@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>オープンチャット（上部固定・新着上）</title>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <style>
+    :root{
+      --bg:#ffffff;
+      --line:#e9e9e9;
+      --text:#111111;
+      --muted:#666666;
+      --accent:#0b5fff;
+      --radius:6px;
+      font-family:"Noto Sans JP","Hiragino Kaku Gothic ProN","Helvetica Neue",Arial,sans-serif;
+    }
+
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased}
+    /* 上部固定の投稿欄 */
+    .composer-fixed{
+      position:fixed;left:0;right:0;top:0;background:linear-gradient(180deg, rgba(255,255,255,0.98), rgba(255,255,255,1));
+      border-bottom:1px solid var(--line);padding:12px 0;z-index:1000;
+      box-shadow:0 4px 12px rgba(0,0,0,0.03);
+    }
+    .composer-inner{max-width:920px;margin:0 auto;padding:0 16px;display:flex;gap:12px;align-items:flex-start}
+    .composer-avatar{width:44px;height:44;border-radius:6px;background:#f0f0f0;display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--text);flex-shrink:0}
+    .composer-right{flex:1;display:flex;flex-direction:column;gap:8px}
+    .row{display:flex;gap:8px}
+    input[type="text"], textarea{
+      width:100%;padding:10px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--text);font-size:14px;
+    }
+    textarea{min-height:64px;resize:vertical}
+    .controls{display:flex;gap:8px;align-items:center}
+    .btn{background:var(--accent);color:#fff;border:none;padding:9px 12px;border-radius:6px;font-weight:700;cursor:pointer}
+    .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--muted);font-weight:600}
+
+    /* ページ本文（投稿欄高さ分の余白を JS で確保） */
+    .page{max-width:920px;margin:0 auto;padding:20px 16px 120px;box-sizing:border-box}
+    .header{padding:12px 0 18px;border-bottom:1px solid var(--line);margin-bottom:12px}
+    .brand{font-weight:700;font-size:18px}
+    .subtitle{color:var(--muted);font-size:13px;margin-top:4px}
+
+    /* メッセージ（新着上） */
+    .message{display:flex;gap:12px;padding:12px;border-bottom:1px solid var(--line);align-items:flex-start;background:transparent}
+    .message .avatar{width:44px;height:44;border-radius:6px;background:#f0f0f0;color:var(--text);display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0}
+    .message .body{flex:1}
+    .meta{display:flex;gap:10px;align-items:center;margin-bottom:6px}
+    .name{font-weight:700;font-size:13px}
+    .time{color:var(--muted);font-size:12px}
+    .text{white-space:pre-wrap;color:var(--text);line-height:1.7;font-size:15px}
+    .reactions{margin-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+    .reaction{border:1px solid var(--line);background:#fff;padding:6px 8px;border-radius:999px;color:var(--muted);font-size:13px;cursor:pointer}
+    .reaction strong{color:var(--text);margin-left:6px;font-weight:700}
+
+    @media (max-width:640px){
+      .composer-inner{padding:0 12px}
+      .row{flex-direction:column}
+    }
+
+    button:focus, input:focus, textarea:focus{outline:3px solid rgba(11,95,255,0.12);outline-offset:2px}
+  </style>
+</head>
+<body>
+  <!-- 投稿欄（上部固定） -->
+  <div class="composer-fixed" id="composerFixed">
+    <div class="composer-inner">
+      <div class="composer-avatar" id="composerAvatar">U</div>
+      <div class="composer-right">
+        <div class="row" style="gap:8px">
+          <input id="username" type="text" placeholder="ユーザー名（任意）" style="max-width:260px" />
+          <input id="seed" type="text" placeholder="seed（任意）" />
+          <button id="openOthello" class="btn" style="flex:0 0 auto">オセロ</button>
+        </div>
+        <textarea id="messageInput" placeholder="コメントを入力（Shift+Enterで改行、Enterで送信）"></textarea>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div style="color:var(--muted);font-size:13px">公開チャットです。節度ある投稿をお願いします。</div>
+          <div class="controls">
+            <button class="btn ghost" id="clearBtn">全削除（管理）</button>
+            <button class="btn" id="sendBtn">送信</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ページ本文：メッセージはここに上から順に追加（新着上） -->
+  <main id="page" class="page" role="main" aria-live="polite">
+    <div class="header">
+      <div class="brand">オープンチャット</div>
+      <div class="subtitle">投稿欄は上部に固定。新着が上に表示されます。</div>
+    </div>
+    <!-- メッセージ要素がここに挿入される -->
+  </main>
+
+  <script>
+    const BASE = 'https://studying-tt.onrender.com';
+    const socket = io(BASE, { transports: ['websocket', 'polling'] });
+
+    const page = document.getElementById('page');
+    const composerFixed = document.getElementById('composerFixed');
+    const sendBtn = document.getElementById('sendBtn');
+    const usernameInput = document.getElementById('username');
+    const messageInput = document.getElementById('messageInput');
+    const seedInput = document.getElementById('seed');
+    const composerAvatar = document.getElementById('composerAvatar');
+    const clearBtn = document.getElementById('clearBtn');
+    const openOthelloBtn = document.getElementById('openOthello');
+
+    let messages = [];
+
+    function avatarText(name){ if(!name) return 'U'; return name.trim().slice(0,2).toUpperCase(); }
+    function formatTime(ts){ try{ return new Date(ts).toLocaleString(); }catch(e){ return ts; } }
+
+    // composer の高さを本文の padding-top に反映（重なり回避）
+    function adjustPagePadding(){
+      const h = composerFixed.getBoundingClientRect().height;
+      page.style.paddingTop = (h + 20) + 'px';
+    }
+    window.addEventListener('resize', adjustPagePadding);
+    window.addEventListener('load', adjustPagePadding);
+
+    // メッセージ要素を先頭に挿入（新着上）
+    function prependMessageElement(m){
+      const item = document.createElement('article');
+      item.className = 'message';
+      item.setAttribute('data-id', m.id);
+
+      const av = document.createElement('div');
+      av.className = 'avatar';
+      av.textContent = avatarText(m.username);
+
+      const body = document.createElement('div');
+      body.className = 'body';
+
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      const name = document.createElement('div');
+      name.className = 'name';
+      name.textContent = m.username || '匿名';
+      const time = document.createElement('div');
+      time.className = 'time';
+      time.textContent = formatTime(m.time);
+
+      meta.appendChild(name);
+      meta.appendChild(time);
+
+      const text = document.createElement('div');
+      text.className = 'text';
+      text.textContent = m.message;
+
+      const reactions = document.createElement('div');
+      reactions.className = 'reactions';
+      const defaultEmojis = ['👍','❤️','😂','😮','😢','😡'];
+      const currentReactions = m.reactions || {};
+
+      defaultEmojis.forEach(emoji => {
+        const count = currentReactions[emoji] || 0;
+        const btn = document.createElement('button');
+        btn.className = 'reaction';
+        btn.innerHTML = `${emoji} <strong>${count}</strong>`;
+        btn.addEventListener('click', () => {
+          socket.emit('updateReaction', { messageId: m.id, reaction: emoji });
+        });
+        reactions.appendChild(btn);
+      });
+
+      Object.keys(currentReactions).forEach(k => {
+        if(defaultEmojis.includes(k)) return;
+        const count = currentReactions[k] || 0;
+        const btn = document.createElement('button');
+        btn.className = 'reaction';
+        btn.innerHTML = `${k} <strong>${count}</strong>`;
+        btn.addEventListener('click', () => {
+          socket.emit('updateReaction', { messageId: m.id, reaction: k });
+        });
+        reactions.appendChild(btn);
+      });
+
+      body.appendChild(meta);
+      body.appendChild(text);
+      body.appendChild(reactions);
+
+      item.appendChild(av);
+      item.appendChild(body);
+
+      const first = page.querySelector('.message');
+      if(first) page.insertBefore(item, first);
+      else page.appendChild(item);
+    }
+
+    // 初期メッセージを読み込み（サーバーは古い→新の順で返す想定）
+    async function loadMessages(){
+      try{
+        const res = await fetch(BASE + '/api/messages');
+        if(!res.ok) throw new Error('Failed to load');
+        messages = await res.json();
+        page.querySelectorAll('.message').forEach(n => n.remove());
+        // サーバーが古い→新の順で返す場合は逆順で先頭に挿入して新着上にする
+        for(let i = messages.length - 1; i >= 0; i--){
+          prependMessageElement(messages[i]);
+        }
+        adjustPagePadding();
+        // ページ上部（最新）に移動
+        window.scrollTo({ top: 0, behavior: 'auto' });
+      }catch(e){
+        console.error(e);
+      }
+    }
+
+    // 新着受信：配列に push しつつ先頭に表示
+    socket.on('newMessage', (msg) => {
+      messages.push(msg);
+      prependMessageElement(msg);
+      // ユーザーが上部（最新）付近にいる場合のみ自動スクロールして最新を表示
+      const nearTop = window.scrollY <= 120;
+      if(nearTop) window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+
+    socket.on('updateReaction', ({ messageId, reactions }) => {
+      const el = page.querySelector(`[data-id="${messageId}"]`);
+      if(!el) return;
+      const reactionsEl = el.querySelector('.reactions');
+      if(!reactionsEl) return;
+      reactionsEl.innerHTML = '';
+      Object.keys(reactions).forEach(k => {
+        const count = reactions[k] || 0;
+        const btn = document.createElement('button');
+        btn.className = 'reaction';
+        btn.innerHTML = `${k} <strong>${count}</strong>`;
+        btn.addEventListener('click', () => {
+          socket.emit('updateReaction', { messageId, reaction: k });
+        });
+        reactionsEl.appendChild(btn);
+      });
+    });
+
+    socket.on('clearMessages', () => {
+      messages = [];
+      page.querySelectorAll('.message').forEach(n => n.remove());
+    });
+
+    async function postMessage(){
+      const username = usernameInput.value.trim() || '匿名';
+      const message = messageInput.value.trim();
+      const seed = seedInput.value.trim() || '';
+      if(!message) return;
+      const payload = { username, message, time: new Date().toISOString(), seed };
+      try{
+        const res = await fetch(BASE + '/api/messages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if(!res.ok){
+          const err = await res.json();
+          alert(err.error || '送信に失敗しました');
+          return;
+        }
+        messageInput.value = '';
+      }catch(e){
+        console.error(e);
+      }
+    }
+
+    async function clearAll(){
+      const pwd = prompt('管理パスワードを入力してください');
+      if(!pwd) return;
+      try{
+        const res = await fetch(BASE + '/api/pass', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-requested-with': 'fetch' },
+          body: JSON.stringify({ password: pwd })
+        });
+        const data = await res.json();
+        if(res.ok){
+          alert(data.message || '削除しました');
+          messages = [];
+          page.querySelectorAll('.message').forEach(n => n.remove());
+        }else{
+          alert(data.error || 'パスワードが違います');
+        }
+      }catch(e){
+        console.error(e);
+      }
+    }
+
+    // イベント
+    sendBtn.addEventListener('click', postMessage);
+    clearBtn.addEventListener('click', clearAll);
+
+    messageInput.addEventListener('keydown', (e) => {
+      if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); postMessage(); }
+    });
+
+    usernameInput.addEventListener('input', () => { composerAvatar.textContent = avatarText(usernameInput.value); });
+
+    // Othello split toggle (opens othello.html in iframe on the right)
+    openOthelloBtn.addEventListener('click', () => {
+      const existing = document.getElementById('othelloFrame');
+      if (existing) {
+        existing.remove();
+        const container = document.querySelector('.split');
+        if (container) {
+          const parent = container.parentNode;
+          parent.replaceChild(document.getElementById('page'), container);
+          // remove split class if any
+        }
+      } else {
+        const room = encodeURIComponent('global');
+        const username = encodeURIComponent(usernameInput.value.trim() || '匿名');
+        const iframe = document.createElement('iframe');
+        iframe.id = 'othelloFrame';
+        iframe.src = `${BASE}/othello.html?room=${room}&username=${username}`;
+        iframe.style.width = '480px';
+        iframe.style.height = 'calc(100vh - 160px)';
+        iframe.style.border = '1px solid var(--line)';
+        iframe.style.borderRadius = '6px';
+        // wrap page and iframe into split container
+        const pageEl = document.getElementById('page');
+        const wrapper = document.createElement('div');
+        wrapper.className = 'split';
+        pageEl.parentNode.replaceChild(wrapper, pageEl);
+        wrapper.appendChild(pageEl);
+        wrapper.appendChild(iframe);
+      }
+    });
+
+    // observe composer size changes to adjust padding
+    const ro = new ResizeObserver(adjustPagePadding);
+    ro.observe(composerFixed);
+
+    // 初期読み込み
+    loadMessages();
+  </script>
+</body>
+</html>
