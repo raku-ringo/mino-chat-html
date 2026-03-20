@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>オープンチャット（上部固定・新着上）</title>
+  <title>オープンチャット + Othello（上部固定・新着上・重なり回避）</title>
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <style>
     :root{
@@ -12,65 +12,94 @@
       --text:#111111;
       --muted:#666666;
       --accent:#0b5fff;
-      --radius:6px;
+      --black:#111111;
+      --white:#ffffff;
+      --radius:8px;
       font-family:"Noto Sans JP","Hiragino Kaku Gothic ProN","Helvetica Neue",Arial,sans-serif;
     }
 
     html,body{height:100%;margin:0;background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased}
-    /* 上部固定の投稿欄 */
+    /* 投稿欄（上部固定） */
     .composer-fixed{
-      position:fixed;left:0;right:0;top:0;background:linear-gradient(180deg, rgba(255,255,255,0.98), rgba(255,255,255,1));
-      border-bottom:1px solid var(--line);padding:12px 0;z-index:1000;
-      box-shadow:0 4px 12px rgba(0,0,0,0.03);
+      position:fixed;left:0;right:0;top:0;background:linear-gradient(180deg, rgba(255,255,255,0.995), rgba(255,255,255,1));
+      border-bottom:1px solid var(--line);padding:12px 0;z-index:1200;
+      box-shadow:0 6px 18px rgba(0,0,0,0.04);
     }
-    .composer-inner{max-width:920px;margin:0 auto;padding:0 16px;display:flex;gap:12px;align-items:flex-start}
-    .composer-avatar{width:44px;height:44;border-radius:6px;background:#f0f0f0;display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--text);flex-shrink:0}
+    .composer-inner{max-width:1200px;margin:0 auto;padding:0 16px;display:flex;gap:12px;align-items:flex-start}
+    .composer-avatar{width:44px;height:44;border-radius:8px;background:#f0f0f0;display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--text);flex-shrink:0}
     .composer-right{flex:1;display:flex;flex-direction:column;gap:8px}
-    .row{display:flex;gap:8px}
+    .row{display:flex;gap:8px;align-items:center}
     input[type="text"], textarea{
-      width:100%;padding:10px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--text);font-size:14px;
+      width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--text);font-size:14px;
     }
     textarea{min-height:64px;resize:vertical}
     .controls{display:flex;gap:8px;align-items:center}
-    .btn{background:var(--accent);color:#fff;border:none;padding:9px 12px;border-radius:6px;font-weight:700;cursor:pointer}
+    .btn{background:var(--accent);color:#fff;border:none;padding:9px 12px;border-radius:8px;font-weight:700;cursor:pointer}
     .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--muted);font-weight:600}
 
-    /* ページ本文（投稿欄高さ分の余白を JS で確保） */
-    .page{max-width:920px;margin:0 auto;padding:20px 16px 120px;box-sizing:border-box}
+    /* ページ本文（投稿欄高さ分の余白は JS で確保） */
+    .page-wrap{max-width:1200px;margin:0 auto;padding:20px 16px 120px;box-sizing:border-box}
     .header{padding:12px 0 18px;border-bottom:1px solid var(--line);margin-bottom:12px}
     .brand{font-weight:700;font-size:18px}
     .subtitle{color:var(--muted);font-size:13px;margin-top:4px}
 
-    /* メッセージ（新着上） */
+    /* 縦分割レイアウト（左: チャット、右: オセロ） */
+    .split { display: grid; grid-template-columns: 1fr 520px; gap: 12px; align-items:start; max-width:1200px; margin:0 auto; }
+    @media(max-width:1100px){ .split { grid-template-columns: 1fr 1fr; } }
+
+    /* チャット（ページ全体スクロール） */
+    .chat-column{background:transparent}
     .message{display:flex;gap:12px;padding:12px;border-bottom:1px solid var(--line);align-items:flex-start;background:transparent}
-    .message .avatar{width:44px;height:44;border-radius:6px;background:#f0f0f0;color:var(--text);display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0}
+    .message .avatar{width:44px;height:44;border-radius:8px;background:#f0f0f0;color:var(--text);display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0}
     .message .body{flex:1}
     .meta{display:flex;gap:10px;align-items:center;margin-bottom:6px}
     .name{font-weight:700;font-size:13px}
     .time{color:var(--muted);font-size:12px}
     .text{white-space:pre-wrap;color:var(--text);line-height:1.7;font-size:15px}
     .reactions{margin-top:8px;display:flex;gap:8px;flex-wrap:wrap}
-    .reaction{border:1px solid var(--line);background:#fff;padding:6px 8px;border-radius:999px;color:var(--muted);font-size:13px;cursor:pointer}
-    .reaction strong{color:var(--text);margin-left:6px;font-weight:700}
+    .reaction{border:1px solid var(--line);background:#fff;padding:6px 8px;border-radius:999px;color:var(--muted);font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+    .reaction strong{color:var(--text);font-weight:700}
 
-    @media (max-width:640px){
-      .composer-inner{padding:0 12px}
-      .row{flex-direction:column}
-    }
+    /* Othello */
+    .othello-panel{background:#fff;border:1px solid var(--line);border-radius:8px;padding:12px;box-sizing:border-box}
+    .rooms{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
+    .room-item{padding:8px;border:1px solid var(--line);border-radius:8px;background:#fafafa;display:flex;justify-content:space-between;align-items:center}
+    .board{display:grid;grid-template-columns:repeat(8,52px);grid-template-rows:repeat(8,52px);gap:6px;margin-top:8px}
+    .cell{width:52px;height:52px;background:#2b7a2b;border-radius:8px;display:flex;align-items:center;justify-content:center;position:relative;cursor:pointer;box-shadow:inset 0 -2px 0 rgba(0,0,0,0.06)}
+    .cell.disabled{cursor:default;opacity:0.9}
+    .disc{width:40px;height:40px;border-radius:50%;box-shadow:0 4px 10px rgba(0,0,0,0.12)}
+    .black{background:var(--black)}
+    .white{background:var(--white);border:1px solid #ccc}
+    .last-move{outline:3px solid rgba(11,95,255,0.18);border-radius:8px}
+    .legal-dot{width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,0.95);position:absolute;opacity:0.95}
+    .turn-indicator{display:flex;gap:8px;align-items:center;margin-top:8px}
+    .badge{padding:6px 10px;border-radius:999px;font-weight:700;color:#fff}
+    .badge.black{background:var(--black)}
+    .badge.white{background:var(--white);color:#111;border:1px solid #ccc}
 
+    /* 結果アニメーション */
+    .overlay{position:fixed;left:0;top:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:2000}
+    .result-card{pointer-events:auto;min-width:280px;padding:28px 32px;border-radius:12px;text-align:center;box-shadow:0 12px 40px rgba(0,0,0,0.18);transform:translateY(-20px);opacity:0;animation:pop 700ms forwards}
+    .result-card.win{background:linear-gradient(135deg,#0b5fff,#3fb0ff);color:#fff}
+    .result-card.lose{background:linear-gradient(135deg,#444,#777);color:#fff}
+    .result-title{font-size:28px;font-weight:900;margin-bottom:8px}
+    .result-sub{font-size:16px;opacity:0.95}
+    @keyframes pop { to { transform:translateY(0); opacity:1; } }
+
+    @media (max-width:640px){ .composer-inner{padding:0 12px} .row{flex-direction:column} .board{transform:scale(0.9);transform-origin:left top} }
     button:focus, input:focus, textarea:focus{outline:3px solid rgba(11,95,255,0.12);outline-offset:2px}
   </style>
 </head>
 <body>
   <!-- 投稿欄（上部固定） -->
-  <div class="composer-fixed" id="composerFixed">
+  <div class="composer-fixed" id="composerFixed" role="region" aria-label="投稿欄">
     <div class="composer-inner">
       <div class="composer-avatar" id="composerAvatar">U</div>
       <div class="composer-right">
-        <div class="row" style="gap:8px">
+        <div class="row">
           <input id="username" type="text" placeholder="ユーザー名（任意）" style="max-width:260px" />
           <input id="seed" type="text" placeholder="seed（任意）" />
-          <button id="openOthello" class="btn" style="flex:0 0 auto">オセロ</button>
+          <button id="toggleOthello" class="btn" style="flex:0 0 auto">オセロ</button>
         </div>
         <textarea id="messageInput" placeholder="コメントを入力（Shift+Enterで改行、Enterで送信）"></textarea>
         <div style="display:flex;justify-content:space-between;align-items:center">
@@ -84,162 +113,179 @@
     </div>
   </div>
 
-  <!-- ページ本文：メッセージはここに上から順に追加（新着上） -->
-  <main id="page" class="page" role="main" aria-live="polite">
+  <!-- 本文 -->
+  <div id="mainWrap" class="page-wrap" role="main">
     <div class="header">
       <div class="brand">オープンチャット</div>
-      <div class="subtitle">投稿欄は上部に固定。新着が上に表示されます。</div>
+      <div class="subtitle">投稿欄は上部に固定。ページをスクロールして過去ログを確認できます。</div>
     </div>
-    <!-- メッセージ要素がここに挿入される -->
-  </main>
+
+    <div id="splitContainer">
+      <div id="chatColumn" class="chat-column" aria-live="polite"></div>
+
+      <aside id="othelloPanel" class="othello-panel" style="display:none" aria-hidden="true">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div style="font-weight:700">オセロ</div>
+          <div class="info">部屋を作成して待機、他のユーザーが参加すると対戦が始まります。観戦も可能です。</div>
+        </div>
+
+        <div id="roomsControls" style="margin-top:8px">
+          <div style="display:flex;gap:8px;margin-bottom:8px">
+            <input id="roomInput" placeholder="部屋ID（任意）" style="flex:1;padding:8px;border:1px solid var(--line);border-radius:8px" />
+            <button id="createRoomBtn" class="btn">新しく作る</button>
+            <button id="refreshRoomsBtn" class="btn ghost">更新</button>
+          </div>
+          <div class="rooms" id="roomsList" aria-live="polite"></div>
+        </div>
+
+        <div id="gameArea" style="display:none;margin-top:8px">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div style="font-weight:700" id="currentRoomLabel">部屋: -</div>
+            <div class="info" id="playersLabel">参加者: -</div>
+          </div>
+
+          <div class="turn-indicator" id="turnIndicator">
+            <div class="label">現在の手番</div>
+            <div id="turnBadge" class="badge" style="margin-left:8px"></div>
+            <div style="margin-left:auto">
+              <span class="badge black">黒</span>
+              <span style="width:8px;display:inline-block"></span>
+              <span class="badge white" style="color:#111;border:1px solid #ccc">白</span>
+            </div>
+          </div>
+
+          <div id="board" class="board" role="grid" aria-label="オセロ盤"></div>
+
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
+            <div class="info" id="statusLabel">状態: -</div>
+            <div>
+              <button id="joinGameBtn" class="btn">対戦参加</button>
+              <button id="leaveRoomBtn" class="btn ghost">退出</button>
+            </div>
+          </div>
+          <div class="info" id="countsLabel" style="margin-top:8px">黒: 0 / 白: 0</div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <div id="overlay" class="overlay" style="display:none"></div>
 
   <script>
     const BASE = 'https://studying-tt.onrender.com';
-    const socket = io(BASE, { transports: ['websocket', 'polling'] });
+    const socket = io(BASE, { transports: ['websocket','polling'] });
 
-    const page = document.getElementById('page');
+    /* Elements */
     const composerFixed = document.getElementById('composerFixed');
+    const pageWrap = document.getElementById('mainWrap');
+    const chatColumn = document.getElementById('chatColumn');
     const sendBtn = document.getElementById('sendBtn');
     const usernameInput = document.getElementById('username');
     const messageInput = document.getElementById('messageInput');
     const seedInput = document.getElementById('seed');
     const composerAvatar = document.getElementById('composerAvatar');
     const clearBtn = document.getElementById('clearBtn');
-    const openOthelloBtn = document.getElementById('openOthello');
+    const toggleOthelloBtn = document.getElementById('toggleOthello');
+
+    const othelloPanel = document.getElementById('othelloPanel');
+    const roomsList = document.getElementById('roomsList');
+    const createRoomBtn = document.getElementById('createRoomBtn');
+    const refreshRoomsBtn = document.getElementById('refreshRoomsBtn');
+    const roomInput = document.getElementById('roomInput');
+    const gameArea = document.getElementById('gameArea');
+    const currentRoomLabel = document.getElementById('currentRoomLabel');
+    const playersLabel = document.getElementById('playersLabel');
+    const boardEl = document.getElementById('board');
+    const statusLabel = document.getElementById('statusLabel');
+    const countsLabel = document.getElementById('countsLabel');
+    const joinGameBtn = document.getElementById('joinGameBtn');
+    const leaveRoomBtn = document.getElementById('leaveRoomBtn');
+    const roomsControls = document.getElementById('roomsControls');
+    const turnBadge = document.getElementById('turnBadge');
+    const overlay = document.getElementById('overlay');
 
     let messages = [];
+    let currentRoom = null;
+    let gameState = null;
+    let myColor = null;
 
+    /* Utility */
     function avatarText(name){ if(!name) return 'U'; return name.trim().slice(0,2).toUpperCase(); }
     function formatTime(ts){ try{ return new Date(ts).toLocaleString(); }catch(e){ return ts; } }
+    function escapeHtml(s){ return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
 
-    // composer の高さを本文の padding-top に反映（重なり回避）
+    /* Ensure page content never overlaps composer: set padding-top dynamically */
     function adjustPagePadding(){
       const h = composerFixed.getBoundingClientRect().height;
-      page.style.paddingTop = (h + 20) + 'px';
+      pageWrap.style.paddingTop = (h + 20) + 'px';
+      // also ensure chatColumn and othelloPanel have top offset if needed
+      chatColumn.style.paddingTop = '0px';
     }
     window.addEventListener('resize', adjustPagePadding);
     window.addEventListener('load', adjustPagePadding);
+    const ro = new ResizeObserver(adjustPagePadding);
+    ro.observe(composerFixed);
 
-    // メッセージ要素を先頭に挿入（新着上）
+    /* Chat: render messages (newest at top) and reactions */
+    function createReactionButton(emoji, count, messageId){
+      const btn = document.createElement('button');
+      btn.className = 'reaction';
+      btn.innerHTML = `${emoji} <strong>${count}</strong>`;
+      btn.addEventListener('click', () => {
+        socket.emit('updateReaction', { messageId, reaction: emoji });
+      });
+      return btn;
+    }
+
     function prependMessageElement(m){
       const item = document.createElement('article');
       item.className = 'message';
       item.setAttribute('data-id', m.id);
 
-      const av = document.createElement('div');
-      av.className = 'avatar';
-      av.textContent = avatarText(m.username);
+      const av = document.createElement('div'); av.className = 'avatar'; av.textContent = avatarText(m.username);
+      const body = document.createElement('div'); body.className = 'body';
 
-      const body = document.createElement('div');
-      body.className = 'body';
+      const meta = document.createElement('div'); meta.className = 'meta';
+      const name = document.createElement('div'); name.className = 'name'; name.textContent = m.username || '匿名';
+      const time = document.createElement('div'); time.className = 'time'; time.textContent = formatTime(m.time);
+      meta.appendChild(name); meta.appendChild(time);
 
-      const meta = document.createElement('div');
-      meta.className = 'meta';
-      const name = document.createElement('div');
-      name.className = 'name';
-      name.textContent = m.username || '匿名';
-      const time = document.createElement('div');
-      time.className = 'time';
-      time.textContent = formatTime(m.time);
+      const text = document.createElement('div'); text.className = 'text'; text.textContent = m.message;
 
-      meta.appendChild(name);
-      meta.appendChild(time);
-
-      const text = document.createElement('div');
-      text.className = 'text';
-      text.textContent = m.message;
-
-      const reactions = document.createElement('div');
-      reactions.className = 'reactions';
+      const reactions = document.createElement('div'); reactions.className = 'reactions';
       const defaultEmojis = ['👍','❤️','😂','😮','😢','😡'];
       const currentReactions = m.reactions || {};
-
       defaultEmojis.forEach(emoji => {
         const count = currentReactions[emoji] || 0;
-        const btn = document.createElement('button');
-        btn.className = 'reaction';
-        btn.innerHTML = `${emoji} <strong>${count}</strong>`;
-        btn.addEventListener('click', () => {
-          socket.emit('updateReaction', { messageId: m.id, reaction: emoji });
-        });
-        reactions.appendChild(btn);
+        reactions.appendChild(createReactionButton(emoji, count, m.id));
       });
-
+      // custom emojis
       Object.keys(currentReactions).forEach(k => {
         if(defaultEmojis.includes(k)) return;
         const count = currentReactions[k] || 0;
-        const btn = document.createElement('button');
-        btn.className = 'reaction';
-        btn.innerHTML = `${k} <strong>${count}</strong>`;
-        btn.addEventListener('click', () => {
-          socket.emit('updateReaction', { messageId: m.id, reaction: k });
-        });
-        reactions.appendChild(btn);
+        reactions.appendChild(createReactionButton(k, count, m.id));
       });
 
-      body.appendChild(meta);
-      body.appendChild(text);
-      body.appendChild(reactions);
+      body.appendChild(meta); body.appendChild(text); body.appendChild(reactions);
+      item.appendChild(av); item.appendChild(body);
 
-      item.appendChild(av);
-      item.appendChild(body);
-
-      const first = page.querySelector('.message');
-      if(first) page.insertBefore(item, first);
-      else page.appendChild(item);
+      const first = chatColumn.querySelector('.message');
+      if(first) chatColumn.insertBefore(item, first); else chatColumn.appendChild(item);
     }
 
-    // 初期メッセージを読み込み（サーバーは古い→新の順で返す想定）
     async function loadMessages(){
       try{
         const res = await fetch(BASE + '/api/messages');
-        if(!res.ok) throw new Error('Failed to load');
+        if(!res.ok) throw new Error('Failed to load messages');
         messages = await res.json();
-        page.querySelectorAll('.message').forEach(n => n.remove());
-        // サーバーが古い→新の順で返す場合は逆順で先頭に挿入して新着上にする
-        for(let i = messages.length - 1; i >= 0; i--){
-          prependMessageElement(messages[i]);
-        }
+        chatColumn.querySelectorAll('.message').forEach(n => n.remove());
+        for(let i = messages.length - 1; i >= 0; i--) prependMessageElement(messages[i]);
         adjustPagePadding();
-        // ページ上部（最新）に移動
         window.scrollTo({ top: 0, behavior: 'auto' });
-      }catch(e){
-        console.error(e);
-      }
+      }catch(e){ console.error(e); }
     }
 
-    // 新着受信：配列に push しつつ先頭に表示
-    socket.on('newMessage', (msg) => {
-      messages.push(msg);
-      prependMessageElement(msg);
-      // ユーザーが上部（最新）付近にいる場合のみ自動スクロールして最新を表示
-      const nearTop = window.scrollY <= 120;
-      if(nearTop) window.scrollTo({ top: 0, behavior: 'smooth' });
-    });
-
-    socket.on('updateReaction', ({ messageId, reactions }) => {
-      const el = page.querySelector(`[data-id="${messageId}"]`);
-      if(!el) return;
-      const reactionsEl = el.querySelector('.reactions');
-      if(!reactionsEl) return;
-      reactionsEl.innerHTML = '';
-      Object.keys(reactions).forEach(k => {
-        const count = reactions[k] || 0;
-        const btn = document.createElement('button');
-        btn.className = 'reaction';
-        btn.innerHTML = `${k} <strong>${count}</strong>`;
-        btn.addEventListener('click', () => {
-          socket.emit('updateReaction', { messageId, reaction: k });
-        });
-        reactionsEl.appendChild(btn);
-      });
-    });
-
-    socket.on('clearMessages', () => {
-      messages = [];
-      page.querySelectorAll('.message').forEach(n => n.remove());
-    });
-
+    /* Post message */
     async function postMessage(){
       const username = usernameInput.value.trim() || '匿名';
       const message = messageInput.value.trim();
@@ -248,90 +294,272 @@
       const payload = { username, message, time: new Date().toISOString(), seed };
       try{
         const res = await fetch(BASE + '/api/messages', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
         });
-        if(!res.ok){
-          const err = await res.json();
-          alert(err.error || '送信に失敗しました');
-          return;
-        }
+        if(!res.ok){ const err = await res.json(); alert(err.error || '送信に失敗しました'); return; }
         messageInput.value = '';
-      }catch(e){
-        console.error(e);
-      }
+      }catch(e){ console.error(e); }
     }
 
+    /* Clear messages (admin) */
     async function clearAll(){
-      const pwd = prompt('管理パスワードを入力してください');
-      if(!pwd) return;
+      const pwd = prompt('管理パスワードを入力してください'); if(!pwd) return;
       try{
         const res = await fetch(BASE + '/api/pass', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-requested-with': 'fetch' },
+          method: 'POST', headers: { 'Content-Type': 'application/json', 'x-requested-with': 'fetch' },
           body: JSON.stringify({ password: pwd })
         });
         const data = await res.json();
-        if(res.ok){
-          alert(data.message || '削除しました');
-          messages = [];
-          page.querySelectorAll('.message').forEach(n => n.remove());
-        }else{
-          alert(data.error || 'パスワードが違います');
+        if(res.ok){ alert(data.message || '削除しました'); chatColumn.querySelectorAll('.message').forEach(n => n.remove()); }
+        else alert(data.error || 'パスワードが違います');
+      }catch(e){ console.error(e); }
+    }
+
+    /* Socket handlers for chat */
+    socket.on('connect', () => {});
+    socket.on('newMessage', (msg) => {
+      messages.push(msg);
+      prependMessageElement(msg);
+      const nearTop = window.scrollY <= 120;
+      if(nearTop) window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+
+    socket.on('updateReaction', ({ messageId, reactions }) => {
+      const el = chatColumn.querySelector(`[data-id="${messageId}"]`);
+      if(!el) return;
+      const reactionsEl = el.querySelector('.reactions');
+      if(!reactionsEl) return;
+      reactionsEl.innerHTML = '';
+      Object.keys(reactions).forEach(k => {
+        const count = reactions[k] || 0;
+        reactionsEl.appendChild(createReactionButton(k, count, messageId));
+      });
+    });
+
+    socket.on('clearMessages', () => { messages = []; chatColumn.querySelectorAll('.message').forEach(n => n.remove()); });
+
+    /* Event bindings */
+    sendBtn.addEventListener('click', postMessage);
+    clearBtn.addEventListener('click', clearAll);
+    messageInput.addEventListener('keydown', (e) => { if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); postMessage(); } });
+    usernameInput.addEventListener('input', () => { composerAvatar.textContent = avatarText(usernameInput.value); });
+
+    /* Othello: rooms, game UI, board rendering */
+    async function fetchRooms(){
+      try{
+        const res = await fetch(BASE + '/api/rooms');
+        if(!res.ok) throw new Error('Failed to fetch rooms');
+        const list = await res.json();
+        renderRooms(list);
+      }catch(e){ console.error(e); roomsList.innerHTML = '<div class="info">ルーム一覧の取得に失敗しました</div>'; }
+    }
+
+    function renderRooms(list){
+      roomsList.innerHTML = '';
+      if(list.length === 0){ roomsList.innerHTML = '<div class="info">現在作成された部屋はありません。</div>'; return; }
+      list.forEach(r => {
+        const item = document.createElement('div'); item.className = 'room-item';
+        const left = document.createElement('div');
+        left.innerHTML = `<div style="font-weight:700">${escapeHtml(r.id)}</div><div class="info">${r.players.length ? escapeHtml(r.players.join(', ')) + ' が待機中です。' : '待機中のプレイヤーはいません。'}</div>`;
+        const right = document.createElement('div');
+        const joinBtn = document.createElement('button'); joinBtn.className = 'btn'; joinBtn.textContent = '参加';
+        joinBtn.addEventListener('click', () => { const username = usernameInput.value.trim() || '匿名'; socket.emit('joinGame', { roomId: r.id, username }); openRoom(r.id); });
+        const watchBtn = document.createElement('button'); watchBtn.className = 'btn ghost'; watchBtn.textContent = '観戦';
+        watchBtn.addEventListener('click', () => openRoom(r.id, true));
+        right.appendChild(joinBtn); right.appendChild(watchBtn);
+        item.appendChild(left); item.appendChild(right);
+        roomsList.appendChild(item);
+      });
+    }
+
+    createRoomBtn.addEventListener('click', () => {
+      const id = roomInput.value.trim() || ('room-' + Math.random().toString(36).slice(2,8));
+      socket.emit('createGame', { roomId: id });
+      const username = usernameInput.value.trim() || '匿名';
+      socket.emit('joinGame', { roomId: id, username });
+      openRoom(id);
+      fetchRooms();
+    });
+    refreshRoomsBtn.addEventListener('click', fetchRooms);
+
+    function openRoom(roomId){
+      currentRoom = roomId;
+      socket.emit('joinRoom', { roomId, username: usernameInput.value.trim() || '匿名' });
+      socket.emit('requestGameState', { roomId });
+      othelloPanel.style.display = 'block';
+      othelloPanel.setAttribute('aria-hidden','false');
+      document.getElementById('splitContainer').classList.add('split');
+      currentRoomLabel.textContent = '部屋: ' + roomId;
+      roomsControls.style.display = 'block';
+      fetchRooms();
+    }
+
+    leaveRoomBtn.addEventListener('click', () => {
+      if(!currentRoom) return;
+      socket.emit('leaveRoom', { roomId: currentRoom });
+      currentRoom = null;
+      gameArea.style.display = 'none';
+      othelloPanel.style.display = 'none';
+      othelloPanel.setAttribute('aria-hidden','true');
+      document.getElementById('splitContainer').classList.remove('split');
+      roomsControls.style.display = 'block';
+      hideResult();
+    });
+
+    /* Board build & render */
+    function buildBoard(){
+      boardEl.innerHTML = '';
+      for(let r=0;r<8;r++){
+        for(let c=0;c<8;c++){
+          const cell = document.createElement('div'); cell.className = 'cell'; cell.dataset.r = r; cell.dataset.c = c;
+          cell.addEventListener('click', () => onCellClick(r,c));
+          boardEl.appendChild(cell);
         }
-      }catch(e){
-        console.error(e);
       }
     }
 
-    // イベント
-    sendBtn.addEventListener('click', postMessage);
-    clearBtn.addEventListener('click', clearAll);
-
-    messageInput.addEventListener('keydown', (e) => {
-      if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); postMessage(); }
-    });
-
-    usernameInput.addEventListener('input', () => { composerAvatar.textContent = avatarText(usernameInput.value); });
-
-    // Othello split toggle (opens othello.html in iframe on the right)
-    openOthelloBtn.addEventListener('click', () => {
-      const existing = document.getElementById('othelloFrame');
-      if (existing) {
-        existing.remove();
-        const container = document.querySelector('.split');
-        if (container) {
-          const parent = container.parentNode;
-          parent.replaceChild(document.getElementById('page'), container);
-          // remove split class if any
-        }
-      } else {
-        const room = encodeURIComponent('global');
-        const username = encodeURIComponent(usernameInput.value.trim() || '匿名');
-        const iframe = document.createElement('iframe');
-        iframe.id = 'othelloFrame';
-        iframe.src = `${BASE}/othello.html?room=${room}&username=${username}`;
-        iframe.style.width = '480px';
-        iframe.style.height = 'calc(100vh - 160px)';
-        iframe.style.border = '1px solid var(--line)';
-        iframe.style.borderRadius = '6px';
-        // wrap page and iframe into split container
-        const pageEl = document.getElementById('page');
-        const wrapper = document.createElement('div');
-        wrapper.className = 'split';
-        pageEl.parentNode.replaceChild(wrapper, pageEl);
-        wrapper.appendChild(pageEl);
-        wrapper.appendChild(iframe);
+    function clearLegalDots(){
+      for(let i=0;i<64;i++){
+        const cell = boardEl.children[i];
+        const dot = cell.querySelector('.legal-dot');
+        if(dot) dot.remove();
       }
+    }
+
+    function renderBoard(board, lastMove, legalMoves){
+      for(let r=0;r<8;r++){
+        for(let c=0;c<8;c++){
+          const idx = r*8 + c;
+          const cell = boardEl.children[idx];
+          cell.innerHTML = '';
+          cell.classList.remove('last-move');
+          if(lastMove && lastMove.r === r && lastMove.c === c) cell.classList.add('last-move');
+          if(board[r][c] === 1){ const d = document.createElement('div'); d.className = 'disc black'; cell.appendChild(d); }
+          else if(board[r][c] === 2){ const d = document.createElement('div'); d.className = 'disc white'; cell.appendChild(d); }
+        }
+      }
+      clearLegalDots();
+      if(Array.isArray(legalMoves)){
+        legalMoves.forEach(([r,c]) => {
+          const idx = r*8 + c;
+          const cell = boardEl.children[idx];
+          const dot = document.createElement('div'); dot.className = 'legal-dot';
+          cell.appendChild(dot);
+        });
+      }
+    }
+
+    function updateGameState(g){
+      gameState = g;
+      statusLabel.textContent = '状態: ' + g.status;
+      countsLabel.textContent = `黒: ${g.counts ? g.counts.black : 0} / 白: ${g.counts ? g.counts.white : 0}`;
+      const p1 = g.players && g.players[1] ? g.players[1] : '-';
+      const p2 = g.players && g.players[2] ? g.players[2] : '-';
+      playersLabel.textContent = `黒: ${p1} / 白: ${p2}`;
+
+      const me = usernameInput.value.trim() || '匿名';
+      if(g.players){
+        if(g.players[1] === me) myColor = 1;
+        else if(g.players[2] === me) myColor = 2;
+        else myColor = null;
+      } else myColor = null;
+
+      if(g.status === 'playing'){
+        roomsControls.style.display = 'none';
+        gameArea.style.display = 'block';
+        if(g.turn === 1){ turnBadge.textContent = '黒'; turnBadge.className = 'badge black'; }
+        else if(g.turn === 2){ turnBadge.textContent = '白'; turnBadge.className = 'badge white'; }
+        else { turnBadge.textContent = '-'; turnBadge.className = 'badge'; }
+        if(myColor){ joinGameBtn.disabled = true; joinGameBtn.textContent = (myColor===1 ? 'あなた: 黒' : 'あなた: 白'); }
+        else { joinGameBtn.disabled = true; joinGameBtn.textContent = '観戦中'; }
+      } else if(g.status === 'waiting'){
+        roomsControls.style.display = 'block';
+        gameArea.style.display = 'block';
+        joinGameBtn.disabled = false;
+        joinGameBtn.textContent = '対戦参加';
+        turnBadge.textContent = '-';
+        turnBadge.className = 'badge';
+        hideResult();
+      } else if(g.status === 'finished'){
+        roomsControls.style.display = 'none';
+        gameArea.style.display = 'block';
+        showResult(g);
+      }
+
+      renderBoard(g.board, g.lastMove, g.legalMoves || []);
+      updateCellInteractivity();
+    }
+
+    function updateCellInteractivity(){
+      const isPlayerTurn = gameState && gameState.status === 'playing' && myColor && gameState.turn === myColor;
+      for(let i=0;i<64;i++){
+        const cell = boardEl.children[i];
+        if(!cell) continue;
+        if(!myColor || !isPlayerTurn) cell.classList.add('disabled'); else cell.classList.remove('disabled');
+      }
+    }
+
+    function onCellClick(r,c){
+      if(!gameState || gameState.status !== 'playing'){ alert('対戦中ではありません'); return; }
+      if(!myColor){ alert('観戦中です。'); return; }
+      if(gameState.turn !== myColor){ alert('あなたの手番ではありません'); return; }
+      const legal = (gameState.legalMoves || []).some(([rr,cc]) => rr===r && cc===c);
+      if(!legal) return;
+      socket.emit('makeMove', { roomId: currentRoom, r, c, color: myColor });
+    }
+
+    joinGameBtn.addEventListener('click', () => {
+      if(!currentRoom) { alert('先に部屋を開いてください'); return; }
+      socket.emit('joinGame', { roomId: currentRoom, username: usernameInput.value.trim() || '匿名' });
+      joinGameBtn.disabled = true;
+      joinGameBtn.textContent = '参加リクエスト中';
     });
 
-    // observe composer size changes to adjust padding
-    const ro = new ResizeObserver(adjustPagePadding);
-    ro.observe(composerFixed);
+    /* Result display */
+    function showResult(g){
+      overlay.style.display = 'flex';
+      overlay.innerHTML = '';
+      const card = document.createElement('div');
+      const me = usernameInput.value.trim() || '匿名';
+      let resultClass = 'lose', title = 'Lose...', sub = '残念でした';
+      if(g.winner === 0){
+        resultClass = 'win'; title = 'Draw'; sub = `引き分けです。黒 ${g.counts.black} - 白 ${g.counts.white}`;
+      } else {
+        const winnerName = (g.players && g.players[g.winner]) ? g.players[g.winner] : (g.winner===1 ? '黒' : '白');
+        if((g.winner === 1 && myColor === 1) || (g.winner === 2 && myColor === 2)){
+          resultClass = 'win'; title = 'Congratulation!'; sub = `勝利しました。${winnerName} が勝者です。`;
+        } else {
+          resultClass = 'lose'; title = 'Lose...'; sub = `敗北しました。勝者: ${winnerName}`;
+        }
+      }
+      card.className = `result-card ${resultClass}`;
+      card.innerHTML = `<div class="result-title">${title}</div><div class="result-sub">${sub}</div>`;
+      overlay.appendChild(card);
+      setTimeout(hideResult, 8000);
+    }
+    function hideResult(){ overlay.style.display = 'none'; overlay.innerHTML = ''; }
 
-    // 初期読み込み
+    /* Socket events for rooms/game */
+    socket.on('roomUpdate', ({ players, roomId }) => {
+      if(roomId === currentRoom) playersLabel.textContent = '参加者: ' + (players.join(', ') || '-');
+      fetchRooms();
+    });
+
+    socket.on('gameState', (g) => {
+      // update only when relevant (server emits to room)
+      updateGameState(g);
+    });
+
+    /* Init */
+    buildBoard();
     loadMessages();
+    fetchRooms();
+
+    /* Toggle othello panel */
+    toggleOthelloBtn.addEventListener('click', () => {
+      if(othelloPanel.style.display === 'none' || othelloPanel.style.display === ''){ othelloPanel.style.display = 'block'; document.getElementById('splitContainer').classList.add('split'); }
+      else { othelloPanel.style.display = 'none'; document.getElementById('splitContainer').classList.remove('split'); }
+    });
   </script>
 </body>
 </html>
