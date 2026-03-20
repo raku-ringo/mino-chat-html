@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>オープンチャット + Othello（上部固定・新着上・重なり回避）</title>
+  <title>オープンチャット + Othello（完全版）</title>
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <style>
     :root{
@@ -26,39 +26,44 @@
       box-shadow:0 6px 18px rgba(0,0,0,0.04);
     }
     .composer-inner{max-width:1200px;margin:0 auto;padding:0 16px;display:flex;gap:12px;align-items:flex-start}
-    .composer-avatar{width:44px;height:44;border-radius:8px;background:#f0f0f0;display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--text);flex-shrink:0}
+    .composer-avatar{width:44px;height:44px;border-radius:8px;background:#f0f0f0;display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--text);flex-shrink:0}
     .composer-right{flex:1;display:flex;flex-direction:column;gap:8px}
     .row{display:flex;gap:8px;align-items:center}
-    input[type="text"], textarea{
-      width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--text);font-size:14px;
-    }
+    input[type="text"], textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--text);font-size:14px}
     textarea{min-height:64px;resize:vertical}
     .controls{display:flex;gap:8px;align-items:center}
     .btn{background:var(--accent);color:#fff;border:none;padding:9px 12px;border-radius:8px;font-weight:700;cursor:pointer}
     .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--muted);font-weight:600}
 
-    /* ページ本文（投稿欄高さ分の余白は JS で確保） */
+    /* 本文（投稿欄高さ分の余白は JS で確保） */
     .page-wrap{max-width:1200px;margin:0 auto;padding:20px 16px 120px;box-sizing:border-box}
     .header{padding:12px 0 18px;border-bottom:1px solid var(--line);margin-bottom:12px}
     .brand{font-weight:700;font-size:18px}
     .subtitle{color:var(--muted);font-size:13px;margin-top:4px}
 
-    /* 縦分割レイアウト（左: チャット、右: オセロ） */
+    /* レイアウト：縦分割（左: チャット、右: オセロ） */
     .split { display: grid; grid-template-columns: 1fr 520px; gap: 12px; align-items:start; max-width:1200px; margin:0 auto; }
     @media(max-width:1100px){ .split { grid-template-columns: 1fr 1fr; } }
 
-    /* チャット（ページ全体スクロール） */
-    .chat-column{background:transparent}
-    .message{display:flex;gap:12px;padding:12px;border-bottom:1px solid var(--line);align-items:flex-start;background:transparent}
-    .message .avatar{width:44px;height:44;border-radius:8px;background:#f0f0f0;color:var(--text);display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0}
-    .message .body{flex:1}
+    /* チャット（新着は下に追加） */
+    .chat-column{background:transparent;display:flex;flex-direction:column;gap:8px;min-height:320px}
+    .message{display:flex;gap:12px;padding:12px;border:1px solid var(--line);border-radius:8px;align-items:flex-start;background:#fff}
+    .avatar{width:44px;height:44px;border-radius:8px;background:#f0f0f0;display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0}
+    .body{flex:1}
     .meta{display:flex;gap:10px;align-items:center;margin-bottom:6px}
     .name{font-weight:700;font-size:13px}
     .time{color:var(--muted);font-size:12px}
     .text{white-space:pre-wrap;color:var(--text);line-height:1.7;font-size:15px}
     .reactions{margin-top:8px;display:flex;gap:8px;flex-wrap:wrap}
-    .reaction{border:1px solid var(--line);background:#fff;padding:6px 8px;border-radius:999px;color:var(--muted);font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+    .reaction{border:1px solid var(--line);background:#fff;padding:6px 8px;border-radius:999px;color:var(--muted);font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:0.2s}
+    .reaction:hover{background:#f9f9f9}
     .reaction strong{color:var(--text);font-weight:700}
+
+    /* 管理者バッジ */
+    .admin-badge{display:inline-block;margin-left:8px;padding:4px 8px;border-radius:999px;background:#ffb400;color:#111;font-weight:700;font-size:12px}
+
+    /* システムメッセージも通常のメッセージと同じ扱い（append） */
+    .system-note{background:#f5f7ff;border-left:4px solid #0b5fff}
 
     /* Othello */
     .othello-panel{background:#fff;border:1px solid var(--line);border-radius:8px;padding:12px;box-sizing:border-box}
@@ -67,11 +72,11 @@
     .board{display:grid;grid-template-columns:repeat(8,52px);grid-template-rows:repeat(8,52px);gap:6px;margin-top:8px}
     .cell{width:52px;height:52px;background:#2b7a2b;border-radius:8px;display:flex;align-items:center;justify-content:center;position:relative;cursor:pointer;box-shadow:inset 0 -2px 0 rgba(0,0,0,0.06)}
     .cell.disabled{cursor:default;opacity:0.9}
-    .disc{width:40px;height:40px;border-radius:50%;box-shadow:0 4px 10px rgba(0,0,0,0.12)}
+    .disc{width:40px;height:40px;border-radius:50%;box-shadow:0 6px 14px rgba(0,0,0,0.18)}
     .black{background:var(--black)}
     .white{background:var(--white);border:1px solid #ccc}
     .last-move{outline:3px solid rgba(11,95,255,0.18);border-radius:8px}
-    .legal-dot{width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,0.95);position:absolute;opacity:0.95}
+    .legal-dot{width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,0.95);position:absolute}
     .turn-indicator{display:flex;gap:8px;align-items:center;margin-top:8px}
     .badge{padding:6px 10px;border-radius:999px;font-weight:700;color:#fff}
     .badge.black{background:var(--black)}
@@ -86,22 +91,29 @@
     .result-sub{font-size:16px;opacity:0.95}
     @keyframes pop { to { transform:translateY(0); opacity:1; } }
 
-    @media (max-width:640px){ .composer-inner{padding:0 12px} .row{flex-direction:column} .board{transform:scale(0.9);transform-origin:left top} }
+    @media (max-width:640px){
+      .composer-inner{padding:0 12px}
+      .row{flex-direction:column}
+      .board{transform:scale(0.9);transform-origin:left top}
+    }
     button:focus, input:focus, textarea:focus{outline:3px solid rgba(11,95,255,0.12);outline-offset:2px}
   </style>
 </head>
 <body>
-  <!-- 投稿欄（上部固定） -->
   <div class="composer-fixed" id="composerFixed" role="region" aria-label="投稿欄">
     <div class="composer-inner">
       <div class="composer-avatar" id="composerAvatar">U</div>
       <div class="composer-right">
         <div class="row">
-          <input id="username" type="text" placeholder="ユーザー名（任意）" style="max-width:260px" />
+          <input id="username" type="text" placeholder="ユーザー名（任意）" style="max-width:260px" maxlength="20" />
           <input id="seed" type="text" placeholder="seed（任意）" />
           <button id="toggleOthello" class="btn" style="flex:0 0 auto">オセロ</button>
+          <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+            <button id="adminLoginBtn" class="btn ghost">管理者ログイン</button>
+            <button id="adminModalBtn" class="btn" style="display:none">管理モーダルを表示</button>
+          </div>
         </div>
-        <textarea id="messageInput" placeholder="コメントを入力（Shift+Enterで改行、Enterで送信）"></textarea>
+        <textarea id="messageInput" placeholder="コメントを入力（Shift+Enterで改行、Enterで送信）" maxlength="200"></textarea>
         <div style="display:flex;justify-content:space-between;align-items:center">
           <div style="color:var(--muted);font-size:13px">公開チャットです。節度ある投稿をお願いします。</div>
           <div class="controls">
@@ -113,20 +125,19 @@
     </div>
   </div>
 
-  <!-- 本文 -->
   <div id="mainWrap" class="page-wrap" role="main">
     <div class="header">
       <div class="brand">オープンチャット</div>
-      <div class="subtitle">投稿欄は上部に固定。ページをスクロールして過去ログを確認できます。</div>
+      <div class="subtitle">投稿欄は上部に固定。新しいコメントは上に追加され、スクロールで過去ログを確認できます。</div>
     </div>
 
     <div id="splitContainer">
-      <div id="chatColumn" class="chat-column" aria-live="polite"></div>
+      <div id="chatColumn" class="chat-column" aria-live="polite" aria-atomic="false"></div>
 
       <aside id="othelloPanel" class="othello-panel" style="display:none" aria-hidden="true">
         <div style="display:flex;justify-content:space-between;align-items:center">
           <div style="font-weight:700">オセロ</div>
-          <div class="info">部屋を作成して待機、他のユーザーが参加すると対戦が始まります。観戦も可能です。</div>
+          <div style="color:var(--muted)">部屋を作成して待機、他のユーザーが参加すると対戦が始まります。観戦も可能です。</div>
         </div>
 
         <div id="roomsControls" style="margin-top:8px">
@@ -186,6 +197,8 @@
     const composerAvatar = document.getElementById('composerAvatar');
     const clearBtn = document.getElementById('clearBtn');
     const toggleOthelloBtn = document.getElementById('toggleOthello');
+    const adminLoginBtn = document.getElementById('adminLoginBtn');
+    const adminModalBtn = document.getElementById('adminModalBtn');
 
     const othelloPanel = document.getElementById('othelloPanel');
     const roomsList = document.getElementById('roomsList');
@@ -208,25 +221,24 @@
     let currentRoom = null;
     let gameState = null;
     let myColor = null;
+    let adminList = [];
+    let adminRedirectUrl = null;
 
-    /* Utility */
+    /* Utilities */
     function avatarText(name){ if(!name) return 'U'; return name.trim().slice(0,2).toUpperCase(); }
     function formatTime(ts){ try{ return new Date(ts).toLocaleString(); }catch(e){ return ts; } }
     function escapeHtml(s){ return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
 
-    /* Ensure page content never overlaps composer: set padding-top dynamically */
+    /* Ensure composer doesn't overlap content */
     function adjustPagePadding(){
       const h = composerFixed.getBoundingClientRect().height;
       pageWrap.style.paddingTop = (h + 20) + 'px';
-      // also ensure chatColumn and othelloPanel have top offset if needed
-      chatColumn.style.paddingTop = '0px';
     }
     window.addEventListener('resize', adjustPagePadding);
     window.addEventListener('load', adjustPagePadding);
-    const ro = new ResizeObserver(adjustPagePadding);
-    ro.observe(composerFixed);
+    new ResizeObserver(adjustPagePadding).observe(composerFixed);
 
-    /* Chat: render messages (newest at top) and reactions */
+    /* Reaction button factory */
     function createReactionButton(emoji, count, messageId){
       const btn = document.createElement('button');
       btn.className = 'reaction';
@@ -237,16 +249,25 @@
       return btn;
     }
 
-    function prependMessageElement(m){
+    /* Render a single message and prepend to top (newest at top) */
+    function appendMessageElement(m){
+      // message wrapper
       const item = document.createElement('article');
       item.className = 'message';
       item.setAttribute('data-id', m.id);
 
+      // avatar
       const av = document.createElement('div'); av.className = 'avatar'; av.textContent = avatarText(m.username);
-      const body = document.createElement('div'); body.className = 'body';
 
+      // body
+      const body = document.createElement('div'); body.className = 'body';
       const meta = document.createElement('div'); meta.className = 'meta';
       const name = document.createElement('div'); name.className = 'name'; name.textContent = m.username || '匿名';
+      // admin badge guaranteed if username in adminList
+      if(adminList.includes(m.username)){
+        const badge = document.createElement('span'); badge.className = 'admin-badge'; badge.textContent = '管理者';
+        name.appendChild(badge);
+      }
       const time = document.createElement('div'); time.className = 'time'; time.textContent = formatTime(m.time);
       meta.appendChild(name); meta.appendChild(time);
 
@@ -259,7 +280,6 @@
         const count = currentReactions[emoji] || 0;
         reactions.appendChild(createReactionButton(emoji, count, m.id));
       });
-      // custom emojis
       Object.keys(currentReactions).forEach(k => {
         if(defaultEmojis.includes(k)) return;
         const count = currentReactions[k] || 0;
@@ -269,23 +289,30 @@
       body.appendChild(meta); body.appendChild(text); body.appendChild(reactions);
       item.appendChild(av); item.appendChild(body);
 
-      const first = chatColumn.querySelector('.message');
-      if(first) chatColumn.insertBefore(item, first); else chatColumn.appendChild(item);
+      // system messages are rendered same as others; if message.username === 'システム' keep same style
+      if(m.username === 'システム'){
+        item.classList.add('system-note');
+      }
+
+      // Prepend instead of append to keep newest at top
+      chatColumn.prepend(item);
     }
 
+    /* Load messages from REST and render (latest at top) */
     async function loadMessages(){
       try{
         const res = await fetch(BASE + '/api/messages');
-        if(!res.ok) throw new Error('Failed to load messages');
+        if(!res.ok) throw new Error('failed');
         messages = await res.json();
-        chatColumn.querySelectorAll('.message').forEach(n => n.remove());
-        for(let i = messages.length - 1; i >= 0; i--) prependMessageElement(messages[i]);
+        chatColumn.querySelectorAll('.message, .system-note').forEach(n => n.remove());
+        // Loop and prepend: to maintain chronological order in array but newest on top, 
+        // we can just use appendMessageElement as is (it prepends).
+        for(let i = 0; i < messages.length; i++) appendMessageElement(messages[i]);
         adjustPagePadding();
-        window.scrollTo({ top: 0, behavior: 'auto' });
       }catch(e){ console.error(e); }
     }
 
-    /* Post message */
+    /* Post message via REST (keeps server canonical) */
     async function postMessage(){
       const username = usernameInput.value.trim() || '匿名';
       const message = messageInput.value.trim();
@@ -310,18 +337,47 @@
           body: JSON.stringify({ password: pwd })
         });
         const data = await res.json();
-        if(res.ok){ alert(data.message || '削除しました'); chatColumn.querySelectorAll('.message').forEach(n => n.remove()); }
+        if(res.ok){ alert(data.message || '削除しました'); chatColumn.querySelectorAll('.message, .system-note').forEach(n => n.remove()); }
         else alert(data.error || 'パスワードが違います');
       }catch(e){ console.error(e); }
     }
 
-    /* Socket handlers for chat */
+    /* Admin login flow: POST /api/admin-login */
+    async function adminLoginFlow(){
+      const username = usernameInput.value.trim() || '匿名';
+      const password = prompt('管理者パスワードを入力してください');
+      if(!password) return;
+      try{
+        const res = await fetch(BASE + '/api/admin-login', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+        const data = await res.json();
+        if(res.ok && data.ok){
+          adminRedirectUrl = data.url || null;
+          alert('管理者ログインに成功しました。管理ボタンが表示されます。');
+          adminModalBtn.style.display = adminRedirectUrl ? 'inline-block' : 'inline-block';
+          // request current admin list to ensure badge display
+          const r = await fetch(BASE + '/api/admins');
+          if(r.ok) adminList = await r.json();
+          // re-render messages to ensure admin badges are shown
+          chatColumn.querySelectorAll('.message, .system-note').forEach(n => n.remove());
+          messages.forEach(m => appendMessageElement(m));
+        } else {
+          alert(data.error || 'パスワードが違います');
+        }
+      }catch(e){ console.error(e); alert('ログインに失敗しました'); }
+    }
+
+    adminLoginBtn.addEventListener('click', adminLoginFlow);
+    adminModalBtn.addEventListener('click', () => { if(adminRedirectUrl) window.open(adminRedirectUrl, '_blank'); });
+
+    /* Socket handlers */
     socket.on('connect', () => {});
     socket.on('newMessage', (msg) => {
+      // keep local messages array in sync and prepend to top
       messages.push(msg);
-      prependMessageElement(msg);
-      const nearTop = window.scrollY <= 120;
-      if(nearTop) window.scrollTo({ top: 0, behavior: 'smooth' });
+      appendMessageElement(msg);
     });
 
     socket.on('updateReaction', ({ messageId, reactions }) => {
@@ -336,19 +392,26 @@
       });
     });
 
-    socket.on('clearMessages', () => { messages = []; chatColumn.querySelectorAll('.message').forEach(n => n.remove()); });
+    socket.on('clearMessages', () => {
+      messages = [];
+      chatColumn.querySelectorAll('.message, .system-note').forEach(n => n.remove());
+    });
 
-    /* Event bindings */
-    sendBtn.addEventListener('click', postMessage);
-    clearBtn.addEventListener('click', clearAll);
-    messageInput.addEventListener('keydown', (e) => { if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); postMessage(); } });
-    usernameInput.addEventListener('input', () => { composerAvatar.textContent = avatarText(usernameInput.value); });
+    socket.on('adminUpdate', (list) => {
+      adminList = Array.isArray(list) ? list : [];
+      // re-render messages to ensure admin badges are shown for all clients
+      chatColumn.querySelectorAll('.message, .system-note').forEach(n => n.remove());
+      messages.forEach(m => appendMessageElement(m));
+      // show admin modal button if current user is admin
+      const me = usernameInput.value.trim() || '匿名';
+      if(adminList.includes(me) && adminRedirectUrl) adminModalBtn.style.display = 'inline-block';
+    });
 
-    /* Othello: rooms, game UI, board rendering */
+    /* Othello: rooms, create, join, board rendering, gameState handling */
     async function fetchRooms(){
       try{
         const res = await fetch(BASE + '/api/rooms');
-        if(!res.ok) throw new Error('Failed to fetch rooms');
+        if(!res.ok) throw new Error('failed');
         const list = await res.json();
         renderRooms(list);
       }catch(e){ console.error(e); roomsList.innerHTML = '<div class="info">ルーム一覧の取得に失敗しました</div>'; }
@@ -374,12 +437,14 @@
 
     createRoomBtn.addEventListener('click', () => {
       const id = roomInput.value.trim() || ('room-' + Math.random().toString(36).slice(2,8));
-      socket.emit('createGame', { roomId: id });
       const username = usernameInput.value.trim() || '匿名';
+      // include username so server can create system message with name
+      socket.emit('createGame', { roomId: id, username });
       socket.emit('joinGame', { roomId: id, username });
       openRoom(id);
       fetchRooms();
     });
+
     refreshRoomsBtn.addEventListener('click', fetchRooms);
 
     function openRoom(roomId){
@@ -515,7 +580,16 @@
       joinGameBtn.textContent = '参加リクエスト中';
     });
 
-    /* Result display */
+    socket.on('roomUpdate', ({ players, roomId }) => {
+      if(roomId === currentRoom) playersLabel.textContent = '参加者: ' + (players.join(', ') || '-');
+      fetchRooms();
+    });
+
+    socket.on('gameState', (g) => {
+      updateGameState(g);
+    });
+
+    /* Result overlay */
     function showResult(g){
       overlay.style.display = 'flex';
       overlay.innerHTML = '';
@@ -539,27 +613,27 @@
     }
     function hideResult(){ overlay.style.display = 'none'; overlay.innerHTML = ''; }
 
-    /* Socket events for rooms/game */
-    socket.on('roomUpdate', ({ players, roomId }) => {
-      if(roomId === currentRoom) playersLabel.textContent = '参加者: ' + (players.join(', ') || '-');
-      fetchRooms();
-    });
-
-    socket.on('gameState', (g) => {
-      // update only when relevant (server emits to room)
-      updateGameState(g);
-    });
-
-    /* Init */
+    /* Initial load */
     buildBoard();
     loadMessages();
     fetchRooms();
 
-    /* Toggle othello panel */
+    /* UI bindings */
+    sendBtn.addEventListener('click', postMessage);
+    messageInput.addEventListener('keydown', (e) => { if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); postMessage(); } });
+    clearBtn.addEventListener('click', clearAll);
     toggleOthelloBtn.addEventListener('click', () => {
       if(othelloPanel.style.display === 'none' || othelloPanel.style.display === ''){ othelloPanel.style.display = 'block'; document.getElementById('splitContainer').classList.add('split'); }
       else { othelloPanel.style.display = 'none'; document.getElementById('splitContainer').classList.remove('split'); }
     });
+
+    // ensure admin list fetched on load so badges show immediately
+    (async () => {
+      try{
+        const res = await fetch(BASE + '/api/admins');
+        if(res.ok) adminList = await res.json();
+      }catch(e){}
+    })();
   </script>
 </body>
 </html>
