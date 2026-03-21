@@ -19,7 +19,7 @@
     }
 
     html,body{height:100%;margin:0;background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased}
-    /* 投稿欄（上部固定） */
+
     .composer-fixed{
       position:fixed;left:0;right:0;top:0;background:linear-gradient(180deg, rgba(255,255,255,0.995), rgba(255,255,255,1));
       border-bottom:1px solid var(--line);padding:12px 0;z-index:1200;
@@ -35,17 +35,17 @@
     .btn{background:var(--accent);color:#fff;border:none;padding:9px 12px;border-radius:8px;font-weight:700;cursor:pointer}
     .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--muted);font-weight:600}
 
-    /* 本文（投稿欄高さ分の余白は JS で確保） */
+
     .page-wrap{max-width:1200px;margin:0 auto;padding:20px 16px 120px;box-sizing:border-box}
     .header{padding:12px 0 18px;border-bottom:1px solid var(--line);margin-bottom:12px}
     .brand{font-weight:700;font-size:18px}
     .subtitle{color:var(--muted);font-size:13px;margin-top:4px}
 
-    /* レイアウト：縦分割（左: チャット、右: オセロ） */
+ 
     .split { display: grid; grid-template-columns: 1fr 520px; gap: 12px; align-items:start; max-width:1200px; margin:0 auto; }
     @media(max-width:1100px){ .split { grid-template-columns: 1fr 1fr; } }
 
-    /* チャット（新着は下に追加） */
+
     .chat-column{background:transparent;display:flex;flex-direction:column;gap:8px;min-height:320px}
     .message{display:flex;gap:12px;padding:12px;border:1px solid var(--line);border-radius:8px;align-items:flex-start;background:#fff}
     .avatar{width:44px;height:44px;border-radius:8px;background:#f0f0f0;display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0}
@@ -59,13 +59,13 @@
     .reaction:hover{background:#f9f9f9}
     .reaction strong{color:var(--text);font-weight:700}
 
-    /* 管理者バッジ */
+
     .admin-badge{display:inline-block;margin-left:8px;padding:4px 8px;border-radius:999px;background:#ffb400;color:#111;font-weight:700;font-size:12px}
 
-    /* システムメッセージも通常のメッセージと同じ扱い（append） */
+
     .system-note{background:#f5f7ff;border-left:4px solid #0b5fff}
 
-    /* Othello */
+
     .othello-panel{background:#fff;border:1px solid var(--line);border-radius:8px;padding:12px;box-sizing:border-box}
     .rooms{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
     .room-item{padding:8px;border:1px solid var(--line);border-radius:8px;background:#fafafa;display:flex;justify-content:space-between;align-items:center}
@@ -126,10 +126,6 @@
   </div>
 
   <div id="mainWrap" class="page-wrap" role="main">
-    <div class="header">
-      <div class="brand">オープンチャット</div>
-      <div class="subtitle">投稿欄は上部に固定。新しいコメントは上に追加され、スクロールで過去ログを確認できます。</div>
-    </div>
 
     <div id="splitContainer">
       <div id="chatColumn" class="chat-column" aria-live="polite" aria-atomic="false"></div>
@@ -229,6 +225,21 @@
     function formatTime(ts){ try{ return new Date(ts).toLocaleString(); }catch(e){ return ts; } }
     function escapeHtml(s){ return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
 
+    /* Impersonation Prevention: Seed Encryption Logic */
+    async function getEncryptedSeed(seed) {
+      if (!seed) return "（Seed未設定：匿名ユーザー）";
+      const msgUint8 = new TextEncoder().encode(seed);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      // ハッシュの最初の16文字を識別子として利用
+      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 16);
+    }
+
+    async function showUserIdentity(seed, username) {
+      const encrypted = await getEncryptedSeed(seed);
+      alert(`ユーザー認証情報\n------------------------\n名前: ${username || '匿名'}\n識別子: ${encrypted}\n\n※この「識別子」はSeedから生成されます。同じ名前でも識別子が異なれば別人です。`);
+    }
+
     /* Ensure composer doesn't overlap content */
     function adjustPagePadding(){
       const h = composerFixed.getBoundingClientRect().height;
@@ -256,13 +267,26 @@
       item.className = 'message';
       item.setAttribute('data-id', m.id);
 
-      // avatar
-      const av = document.createElement('div'); av.className = 'avatar'; av.textContent = avatarText(m.username);
+      // avatar (Clickable)
+      const av = document.createElement('div'); 
+      av.className = 'avatar'; 
+      av.textContent = avatarText(m.username);
+      av.style.cursor = 'pointer';
+      av.title = '識別子を表示';
+      av.onclick = () => showUserIdentity(m.seed, m.username);
 
       // body
       const body = document.createElement('div'); body.className = 'body';
       const meta = document.createElement('div'); meta.className = 'meta';
-      const name = document.createElement('div'); name.className = 'name'; name.textContent = m.username || '匿名';
+      
+      // name (Clickable)
+      const name = document.createElement('div'); 
+      name.className = 'name'; 
+      name.textContent = m.username || '匿名';
+      name.style.cursor = 'pointer';
+      name.title = '識別子を表示';
+      name.onclick = () => showUserIdentity(m.seed, m.username);
+
       // admin badge guaranteed if username in adminList
       if(adminList.includes(m.username)){
         const badge = document.createElement('span'); badge.className = 'admin-badge'; badge.textContent = '管理者';
@@ -289,7 +313,7 @@
       body.appendChild(meta); body.appendChild(text); body.appendChild(reactions);
       item.appendChild(av); item.appendChild(body);
 
-      // system messages are rendered same as others; if message.username === 'システム' keep same style
+      // system messages are rendered same as others
       if(m.username === 'システム'){
         item.classList.add('system-note');
       }
@@ -305,14 +329,12 @@
         if(!res.ok) throw new Error('failed');
         messages = await res.json();
         chatColumn.querySelectorAll('.message, .system-note').forEach(n => n.remove());
-        // Loop and prepend: to maintain chronological order in array but newest on top, 
-        // we can just use appendMessageElement as is (it prepends).
         for(let i = 0; i < messages.length; i++) appendMessageElement(messages[i]);
         adjustPagePadding();
       }catch(e){ console.error(e); }
     }
 
-    /* Post message via REST (keeps server canonical) */
+    /* Post message via REST */
     async function postMessage(){
       const username = usernameInput.value.trim() || '匿名';
       const message = messageInput.value.trim();
@@ -342,7 +364,7 @@
       }catch(e){ console.error(e); }
     }
 
-    /* Admin login flow: POST /api/admin-login */
+    /* Admin login flow */
     async function adminLoginFlow(){
       const username = usernameInput.value.trim() || '匿名';
       const password = prompt('管理者パスワードを入力してください');
@@ -357,10 +379,8 @@
           adminRedirectUrl = data.url || null;
           alert('管理者ログインに成功しました。管理ボタンが表示されます。');
           adminModalBtn.style.display = adminRedirectUrl ? 'inline-block' : 'inline-block';
-          // request current admin list to ensure badge display
           const r = await fetch(BASE + '/api/admins');
           if(r.ok) adminList = await r.json();
-          // re-render messages to ensure admin badges are shown
           chatColumn.querySelectorAll('.message, .system-note').forEach(n => n.remove());
           messages.forEach(m => appendMessageElement(m));
         } else {
@@ -375,7 +395,6 @@
     /* Socket handlers */
     socket.on('connect', () => {});
     socket.on('newMessage', (msg) => {
-      // keep local messages array in sync and prepend to top
       messages.push(msg);
       appendMessageElement(msg);
     });
@@ -399,15 +418,13 @@
 
     socket.on('adminUpdate', (list) => {
       adminList = Array.isArray(list) ? list : [];
-      // re-render messages to ensure admin badges are shown for all clients
       chatColumn.querySelectorAll('.message, .system-note').forEach(n => n.remove());
       messages.forEach(m => appendMessageElement(m));
-      // show admin modal button if current user is admin
       const me = usernameInput.value.trim() || '匿名';
       if(adminList.includes(me) && adminRedirectUrl) adminModalBtn.style.display = 'inline-block';
     });
 
-    /* Othello: rooms, create, join, board rendering, gameState handling */
+    /* Othello Logic */
     async function fetchRooms(){
       try{
         const res = await fetch(BASE + '/api/rooms');
@@ -438,7 +455,6 @@
     createRoomBtn.addEventListener('click', () => {
       const id = roomInput.value.trim() || ('room-' + Math.random().toString(36).slice(2,8));
       const username = usernameInput.value.trim() || '匿名';
-      // include username so server can create system message with name
       socket.emit('createGame', { roomId: id, username });
       socket.emit('joinGame', { roomId: id, username });
       openRoom(id);
@@ -471,7 +487,6 @@
       hideResult();
     });
 
-    /* Board build & render */
     function buildBoard(){
       boardEl.innerHTML = '';
       for(let r=0;r<8;r++){
@@ -550,7 +565,6 @@
         gameArea.style.display = 'block';
         showResult(g);
       }
-
       renderBoard(g.board, g.lastMove, g.legalMoves || []);
       updateCellInteractivity();
     }
@@ -589,7 +603,6 @@
       updateGameState(g);
     });
 
-    /* Result overlay */
     function showResult(g){
       overlay.style.display = 'flex';
       overlay.innerHTML = '';
@@ -627,7 +640,6 @@
       else { othelloPanel.style.display = 'none'; document.getElementById('splitContainer').classList.remove('split'); }
     });
 
-    // ensure admin list fetched on load so badges show immediately
     (async () => {
       try{
         const res = await fetch(BASE + '/api/admins');
